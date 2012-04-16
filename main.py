@@ -3,9 +3,7 @@ Created on 29 mars 2012
 
 @author: damienp
 '''
-from com.safeexecution.SafeEvalVisitor import *
-from com.testunitaire.TestSafeEval import TestSafeEval
-import unittest
+from com.safeexecution.SafeEvalVisitor import safe_eval
 
 
 if __name__ == '__main__':
