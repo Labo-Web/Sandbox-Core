@@ -4,14 +4,16 @@ Created on 12 avr. 2012
 @author: damienp
 '''
 from com.exception.safe_eval_exception import SafeEvalTimeoutException, \
-    SafeEvalContextException, SafeEvalCodeException
+    SafeEvalContextException, SafeEvalCodeException, SafeEvalExecException
 from com.helpers.helpers import Helpers
 from com.safeexecution.SafeEvalError import SafeEvalBuiltinError, \
     SafeEvalAttrError, SafeEvalASTNodeError
+from inspect import Traceback
 import compiler
 import inspect
-import thread
+import threading
 import time
+import traceback
 
 
 #----------------------------------------------------------------------
@@ -114,29 +116,6 @@ def is_unallowed_attr(name):
            
 
 class SafeEvalVisitor(object):
-    """
-    Data-driven visitor which walks the AST for some code and makes
-    sure it doesn't contain any expression/statements which are
-    declared as restricted in 'unallowed_ast_nodes'. We'll also make
-    sure that there aren't any attempts to access/lookup restricted
-    builtin declared in 'unallowed_builtins'. By default we also won't
-    allow access to lowlevel stuff which can be used to dynamically
-    access non-local envrioments.
-
-    Interface:
-      walk(ast) = validate AST and return True if AST is 'safe'
-
-    Attributes:
-      errors = list of SafeEvalError if walk() returned False
-
-    Implementation:
-    
-    The visitor will automatically generate methods for all of the
-    available AST node types and redirect them to self.ok or self.fail
-    reflecting the configuration in 'unallowed_ast_nodes'. While
-    walking the AST we simply forward the validating step to each of
-    node callbacks which take care of reporting errors.
-    """
 
     def __init__(self):
         "Initialize visitor by generating callbacks for all AST node types."
@@ -206,8 +185,10 @@ def exec_timed(code, context, timeout_secs):
     the given timelimit.
     """
     assert(timeout_secs > 0)
+    
 
     signal_finished = False
+    exec_errors = []
     
     def alarm(secs):
         def wait(secs):
@@ -215,19 +196,30 @@ def exec_timed(code, context, timeout_secs):
                 time.sleep(1)
                 if signal_finished: break
             else:
-                thread.interrupt_main()
-        thread.start_new_thread(wait, (secs,))
+                #thread.interrupt_main()
+                exec_errors.append(SafeEvalTimeoutException(secs))
+        #thread.Start_new_thread(wait, (secs,))
+        threading._start_new_thread(wait, (secs,))
 
+   
     try:
         alarm(timeout_secs)
         exec code in context
         signal_finished = True
-    except KeyboardInterrupt:
-        raise SafeEvalTimeoutException(timeout_secs)
-
-def safe_eval(code, context = {}, timeout_secs = 1):
+    
+    except Exception, e:
+        exec_errors.append(traceback.format_exc())
+        
+        #raise SafeEvalTimeoutException(timeout_secs)
+    finally:
+        return exec_errors
+        
+        
+        
+def safe_eval(out_queue, code, context = {}, timeout_secs = 1):
     
     ctx_errkeys, ctx_errors = [], []
+    
     for (key, obj) in context.items():
         if inspect.isbuiltin(obj):
             ctx_errkeys.append(key)
@@ -237,15 +229,23 @@ def safe_eval(code, context = {}, timeout_secs = 1):
             ctx_errors.append("key '%s' : unallowed module %s" % (key, obj))
 
     if ctx_errors:
-        raise SafeEvalContextException(ctx_errkeys, ctx_errors)
+        out_queue.put(SafeEvalContextException(ctx_errkeys, ctx_errors))
 
     ast = compiler.parse(code)
     checker = SafeEvalVisitor()
 
     if checker.walk(ast):
-        exec_timed(code, context, timeout_secs)
+        exec_errors = exec_timed(code, context, timeout_secs)
+      
+        if(len(exec_errors) > 0):
+            for error in exec_errors:
+                out_queue.put(error)
+            
     else:
-        raise SafeEvalCodeException(code, checker.errors)
+        out_queue.put(SafeEvalCodeException(code, checker.errors))
+    
+    
 
         
         
+       

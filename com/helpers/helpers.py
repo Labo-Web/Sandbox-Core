@@ -36,7 +36,7 @@ class Helpers(object):
     
     @staticmethod
     def  DEBUG():
-        return True
+        return False
     
     
 
